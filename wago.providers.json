@@ -1,0 +1,83 @@
+{
+  "$schema": "https://wago.sh/v1/providers.schema.json",
+  "providers": [
+    {
+      "importPath": "github.com/jtenner/wago-zstd/register",
+      "definition": {
+        "id": "github.com/jtenner/wago-zstd",
+        "name": "Zstandard",
+        "version": "0.0.0",
+        "description": "Bounded whole-buffer Zstandard compression and decompression.",
+        "stability": "experimental",
+        "compatibility": {
+          "engines": {
+            "go": "\u003e=1.25",
+            "wago": "\u003e=0.1.0"
+          },
+          "platforms": [
+            "linux/amd64"
+          ]
+        },
+        "provenance": {
+          "repository": "https://github.com/jtenner/wago-zstd",
+          "license": "Apache-2.0",
+          "authors": [
+            "jtenner"
+          ]
+        },
+        "authorities": [
+          {
+            "name": "host.import.define",
+            "mode": "required",
+            "reason": "define the bounded Zstandard guest APIs",
+            "scope": {
+              "modules": [
+                "wago_zstd.gc",
+                "wago_zstd.wasm32",
+                "wago_zstd.wasm64"
+              ]
+            }
+          }
+        ],
+        "configSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "max_concurrent": {
+              "default": 2,
+              "maximum": 8,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "max_decoder_memory_bytes": {
+              "default": 33554432,
+              "maximum": 67108864,
+              "minimum": 1024,
+              "type": "integer"
+            },
+            "max_input_bytes": {
+              "default": 8388608,
+              "maximum": 67108864,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "max_output_bytes": {
+              "default": 33554432,
+              "maximum": 67108864,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "max_window_bytes": {
+              "default": 8388608,
+              "maximum": 67108864,
+              "minimum": 1024,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "definitionDigest": "sha256:6140f2da5c4007531ecb1985a38fcb7181f00b1df250594f1e0965bdde494d5c"
+    }
+  ]
+}

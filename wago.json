@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wago.sh/v1/schema.json",
+  "package": {
+    "module": "github.com/jtenner/wago-zstd",
+    "version": "0.0.0",
+    "name": "Zstandard",
+    "description": "Bounded whole-buffer Zstandard compression and decompression.",
+    "stability": "experimental",
+    "license": "Apache-2.0",
+    "repository": "https://github.com/jtenner/wago-zstd",
+    "authors": [{"name": "jtenner"}],
+    "platforms": ["linux/amd64"],
+    "category": "compression",
+    "tags": ["zstandard", "zstd", "compression", "wasmgc", "wasm32", "wasm64"],
+    "engines": {
+      "wago": ">=0.1.0",
+      "go": ">=1.25"
+    }
+  },
+  "plugins": {}
+}
