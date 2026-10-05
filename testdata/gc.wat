@@ -9,6 +9,10 @@
     (func $decompress (param (ref $bytes) i32 i32 (ref $bytes) i32 i32) (result i32 i32)))
   (import "wago_zstd.gc" "compress"
     (func $compress-immutable (param (ref $immutable-bytes) i32 i32 (ref $bytes) i32 i32 i32) (result i32 i32)))
+  (import "wago_zstd.gc" "compress_packed"
+    (func $compress-packed (param (ref $bytes) i32 i32 (ref $bytes) i32 i32 i32) (result i64)))
+  (import "wago_zstd.gc" "decompress_packed"
+    (func $decompress-packed (param (ref $bytes) i32 i32 (ref $bytes) i32 i32) (result i64)))
 
   (func (export "run") (result i32)
     (local $source (ref null $bytes))
@@ -422,4 +426,162 @@
     array.get $bytes
     i32.const 65
     i32.eq
+    i32.and)
+
+  (func (export "packed_parity") (result i32)
+    (local $source (ref null $bytes))
+    (local $legacy-compressed (ref null $bytes))
+    (local $packed-compressed (ref null $bytes))
+    (local $output (ref null $bytes))
+    (local $legacy-status i32)
+    (local $legacy-written i32)
+    (local $compressed-length i32)
+    (local $packed i64)
+
+    i32.const 16
+    array.new_default $bytes
+    local.set $source
+    local.get $source
+    ref.as_non_null
+    i32.const 0
+    i32.const 65
+    i32.const 16
+    array.fill $bytes
+    i32.const 256
+    array.new_default $bytes
+    local.set $legacy-compressed
+    i32.const 256
+    array.new_default $bytes
+    local.set $packed-compressed
+    i32.const 32
+    array.new_default $bytes
+    local.set $output
+
+    local.get $source
+    ref.as_non_null
+    i32.const 0
+    i32.const 64
+    local.get $legacy-compressed
+    ref.as_non_null
+    i32.const 0
+    i32.const 1024
+    i32.const 0
+    call $compress
+    local.set $legacy-written
+    local.set $legacy-status
+
+    local.get $source
+    ref.as_non_null
+    i32.const 0
+    i32.const 64
+    local.get $packed-compressed
+    ref.as_non_null
+    i32.const 0
+    i32.const 1024
+    i32.const 0
+    call $compress-packed
+    local.set $packed
+    local.get $packed
+    i32.wrap_i64
+    local.get $legacy-status
+    i32.ne
+    if
+      i32.const 0
+      return
+    end
+    local.get $packed
+    i64.const 32
+    i64.shr_u
+    i32.wrap_i64
+    local.get $legacy-written
+    i32.ne
+    if
+      i32.const 0
+      return
+    end
+    local.get $legacy-written
+    local.set $compressed-length
+
+    local.get $legacy-compressed
+    ref.as_non_null
+    i32.const 0
+    local.get $compressed-length
+    local.get $output
+    ref.as_non_null
+    i32.const 0
+    i32.const 128
+    call $decompress
+    local.set $legacy-written
+    local.set $legacy-status
+
+    local.get $packed-compressed
+    ref.as_non_null
+    i32.const 0
+    local.get $compressed-length
+    local.get $output
+    ref.as_non_null
+    i32.const 0
+    i32.const 128
+    call $decompress-packed
+    local.set $packed
+    local.get $packed
+    i32.wrap_i64
+    local.get $legacy-status
+    i32.eq
+    local.get $packed
+    i64.const 32
+    i64.shr_u
+    i32.wrap_i64
+    local.get $legacy-written
+    i32.eq
+    i32.and
+    local.get $output
+    ref.as_non_null
+    i32.const 0
+    array.get $bytes
+    i32.const 65
+    i32.eq
+    i32.and
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+
+    ;; Invalid-level failures must also have identical status and written=0.
+    local.get $source
+    ref.as_non_null
+    i32.const 0
+    i32.const 64
+    local.get $legacy-compressed
+    ref.as_non_null
+    i32.const 0
+    i32.const 1024
+    i32.const 23
+    call $compress
+    local.set $legacy-written
+    local.set $legacy-status
+    local.get $source
+    ref.as_non_null
+    i32.const 0
+    i32.const 64
+    local.get $packed-compressed
+    ref.as_non_null
+    i32.const 0
+    i32.const 1024
+    i32.const 23
+    call $compress-packed
+    local.set $packed
+    local.get $packed
+    i32.wrap_i64
+    local.get $legacy-status
+    i32.eq
+    local.get $legacy-written
+    i32.eqz
+    i32.and
+    local.get $packed
+    i64.const 32
+    i64.shr_u
+    i32.wrap_i64
+    i32.eqz
     i32.and))

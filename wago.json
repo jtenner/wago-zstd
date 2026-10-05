@@ -2,7 +2,7 @@
   "$schema": "https://wago.sh/v1/schema.json",
   "package": {
     "module": "github.com/jtenner/wago-zstd",
-    "version": "0.0.0",
+    "version": "0.0.1",
     "name": "Zstandard",
     "description": "Bounded whole-buffer Zstandard compression and decompression.",
     "stability": "experimental",

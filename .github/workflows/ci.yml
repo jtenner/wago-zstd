@@ -23,28 +23,38 @@ jobs:
       - run: go vet ./...
 
   tinygo-host:
-    name: TinyGo host integration (linux/amd64)
+    name: TinyGo guest and host integration (linux/amd64)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          # klauspost/compress v1.20.1 requires Go 1.25; TinyGo 0.41.1
-          # supports Go through 1.26, so pin the shared compatible toolchain.
-          go-version: "1.26.1"
+          go-version: "1.27.1"
           cache: true
       - uses: acifani/setup-tinygo@db56321a62b9a67922bb9ac8f9d085e218807bb3 # v2
         with:
-          tinygo-version: "0.41.1"
+          tinygo-version: "0.42.0"
           install-binaryen: false
       - name: Install TinyGo native linker
         run: command -v ld.lld >/dev/null || (sudo apt-get update && sudo apt-get install -y lld)
-      - name: Report pinned host toolchain
+      - name: Report pinned TinyGo toolchain
         run: |
           go version
           tinygo version
-      - name: Execute TinyGo-hosted Wasm32, Memory64, and WasmGC plugin integration
+      - name: Build genuine TinyGo Wasm32 guest
+        run: >-
+          tinygo build
+          -target=wasm-unknown
+          -no-debug
+          -opt=z
+          -o testdata/tinygo_guest.wasm
+          ./testdata/tinygo_guest
+      - name: Verify checked-in TinyGo guest is current
+        run: git diff --exit-code -- testdata/tinygo_guest.wasm
+      - name: Execute TinyGo guest in ordinary Go host
+        run: go test -count=1 -v -run '^TestTinyGoGuestPackedABI$' .
+      - name: Execute TinyGo guest and all ABIs in TinyGo-built host
         run: >-
           tinygo test -v
           -scheduler=tasks
@@ -53,5 +63,6 @@ jobs:
           -no-debug
           -p=2
           -tags=noasm
+          -count=1
           -run '^TestTinyGoHostIntegration$'
           .

@@ -5,8 +5,9 @@
 codec to maintained [`klauspost/compress/zstd`](https://github.com/klauspost/compress/tree/v1.20.1/zstd)
 rather than implementing Zstandard in this repository.
 
-The first ABI is intentionally small: `abi_version`, `compress`, and
-`decompress`. It supports Wago's Wasm32, Memory64, and Wasm GC storage paths.
+The ABI is intentionally small: `abi_version`, legacy multi-value `compress`
+and `decompress`, and additive `compress_packed` and `decompress_packed`
+operations. It supports Wago's Wasm32, Memory64, and Wasm GC storage paths.
 There are no dictionaries, dictionary training, streaming handles, or retained
 guest pointers.
 
@@ -54,8 +55,13 @@ All namespaces expose:
 - `abi_version() -> i32`
 - `compress(source, destination, level) -> (status: i32, written: i32)`
 - `decompress(source, destination) -> (status: i32, written: i32)`
+- `compress_packed(source, destination, level) -> i64`
+- `decompress_packed(source, destination) -> i64`
 
-The concrete signatures and status table are in [ABI.md](ABI.md).
+Packed results place status in the low 32 bits and written in the high 32 bits;
+failures always have a zero written half. They use the same parameters and
+transaction semantics as the legacy calls. The concrete signatures and status
+table are in [ABI.md](ABI.md).
 
 Compression accepts requested Zstandard levels from `-5` through `22`, with
 `0` meaning the plugin default. These are mapped to klauspost's four coarse
@@ -133,28 +139,49 @@ go test -race ./...
 go vet ./...
 ```
 
-### TinyGo host qualification
+### TinyGo guest and host qualification
 
-The dedicated Linux/amd64 CI job builds and executes Wago plus this plugin as a
-TinyGo **host**. It runs the Wasm32, Memory64, and WasmGC fixtures through the
-real host imports, including success, overlap, short-output, bounds, malformed
-input, checksum, and immutable-GC-source cases. These fixtures are authored in
-WAT; this qualification is distinct from compiling a guest with TinyGo.
+The dedicated Linux/amd64 CI job first builds
+[`testdata/tinygo_guest/main.go`](testdata/tinygo_guest/main.go) as a genuine
+TinyGo Wasm32 guest. It executes that guest through the real packed imports in
+both the ordinary Go Wago host and a TinyGo-built Wago host. The guest checks
+round trips, empty input, overlap, short-output atomicity, configured bounds,
+checksum failure, truncation, malformed input, invalid levels, zero failure
+counts, and unchanged sentinel destinations.
+
+The same job also executes WAT-authored Wasm32, Memory64, and WasmGC fixtures.
+Those fixtures check legacy/packed parity and cover storage features TinyGo's
+`wasm-unknown` guest target does not emit.
 
 The pinned toolchain and flags are:
 
 ```sh
-# TinyGo 0.41.1, Go 1.26.1, Linux/amd64
+# TinyGo 0.42.0, Go 1.27.1, Linux/amd64
+tinygo build -target=wasm-unknown -no-debug -opt=z \
+  -o testdata/tinygo_guest.wasm ./testdata/tinygo_guest
+go test -count=1 -v -run '^TestTinyGoGuestPackedABI$' .
 tinygo test -v -scheduler=tasks -gc=conservative -opt=z -no-debug -p=2 \
-  -tags=noasm -run '^TestTinyGoHostIntegration$' .
+  -tags=noasm -count=1 -run '^TestTinyGoHostIntegration$' .
 ```
 
-Wago v0.1.0-beta.11 pins TinyGo 0.41.1. Its usual Go 1.22 pairing cannot load
-`klauspost/compress` v1.20.1, whose module requires Go 1.25, so CI pins Go
-1.26.1: it satisfies the dependency and remains within TinyGo 0.41.1's supported
-Go 1.19–1.26 range. The `noasm` tag selects klauspost's maintained pure-Go
-codec path; without it, TinyGo cannot link the dependency's Go-assembly entry
-points. This does not replace the codec or fork its algorithm.
+TinyGo 0.42.0 and Go 1.27.1 are pinned for the guest build and host execution.
+The `noasm` tag is required only when compiling the host: it selects
+klauspost's maintained pure-Go codec path because TinyGo cannot link the
+dependency's Go-assembly entry points. This does not replace the codec or fork
+its algorithm.
+
+#### TinyGo guest output limits
+
+The TinyGo target is `wasm-unknown`, so the guest uses the Wasm32 namespace and
+unsigned 32-bit pointers. Its imported packed operations return a single `i64`;
+the guest does not depend on multi-value import lowering. The checked-in test
+guest intentionally has a 2 KiB compressed buffer and a 512-byte output buffer.
+Those fixture capacities are separate from the host plugin configuration used
+by the test (1 MiB input/output) and from the plugin's 64 MiB hard output cap.
+A production guest must supply a destination buffer large enough for its data,
+subject to both its Wasm32 linear-memory limits and the host's configured
+`max_output_bytes`. This qualification does not claim TinyGo-generated
+Memory64 or WasmGC guests.
 
 The checked-in integration fixtures can be regenerated with `wasm-tools`:
 

@@ -5,6 +5,19 @@
 Every operation returns `(status, written)`. `written` is nonzero only when
 `status == 0`.
 
+Each namespace also has additive packed forms with the same parameters:
+
+```text
+compress_packed(...) -> i64
+decompress_packed(...) -> i64
+```
+
+The low 32 bits contain the unsigned status value and the high 32 bits contain
+the unsigned written count. Every nonzero status has a zero high half. The
+64 MiB hard output cap keeps every successful written count representable as
+`u32`. These additions do not change `abi_version()`, which remains `1`, or
+remove the legacy multi-value operations.
+
 ### `wago_zstd.wasm32`
 
 ```text
@@ -13,6 +26,10 @@ compress(src_ptr:i32, src_len:i32, dst_ptr:i32, dst_cap:i32, level:i32)
   -> (status:i32, written:i32)
 decompress(src_ptr:i32, src_len:i32, dst_ptr:i32, dst_cap:i32)
   -> (status:i32, written:i32)
+compress_packed(src_ptr:i32, src_len:i32, dst_ptr:i32, dst_cap:i32, level:i32)
+  -> i64
+decompress_packed(src_ptr:i32, src_len:i32, dst_ptr:i32, dst_cap:i32)
+  -> i64
 ```
 
 Pointers and lengths are interpreted as unsigned 32-bit values in first linear
@@ -26,6 +43,10 @@ compress(src_ptr:i64, src_len:i64, dst_ptr:i64, dst_cap:i64, level:i32)
   -> (status:i32, written:i32)
 decompress(src_ptr:i64, src_len:i64, dst_ptr:i64, dst_cap:i64)
   -> (status:i32, written:i32)
+compress_packed(src_ptr:i64, src_len:i64, dst_ptr:i64, dst_cap:i64, level:i32)
+  -> i64
+decompress_packed(src_ptr:i64, src_len:i64, dst_ptr:i64, dst_cap:i64)
+  -> i64
 ```
 
 Pointers and lengths are interpreted as unsigned 64-bit values in first linear
@@ -42,6 +63,12 @@ compress(src_ref:anyref, src_offset:i32, src_len:i32,
 decompress(src_ref:anyref, src_offset:i32, src_len:i32,
            dst_ref:anyref, dst_offset:i32, dst_cap:i32)
   -> (status:i32, written:i32)
+compress_packed(src_ref:anyref, src_offset:i32, src_len:i32,
+                dst_ref:anyref, dst_offset:i32, dst_cap:i32, level:i32)
+  -> i64
+decompress_packed(src_ref:anyref, src_offset:i32, src_len:i32,
+                  dst_ref:anyref, dst_offset:i32, dst_cap:i32)
+  -> i64
 ```
 
 Offsets and lengths are unsigned byte counts. References must dynamically be

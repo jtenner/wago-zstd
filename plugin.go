@@ -33,7 +33,7 @@ func Definition() wago.PluginDefinition {
 	return wago.PluginDefinition{
 		ID:          PluginID,
 		Name:        "Zstandard",
-		Version:     "0.0.0",
+		Version:     "0.0.1",
 		Description: "Bounded whole-buffer Zstandard compression and decompression.",
 		Stability:   wago.Experimental,
 		Compatibility: wago.Compatibility{
@@ -137,7 +137,7 @@ func (p *Plugin) Register(reg *wago.Registrar) (registerErr error) {
 	}})
 }
 
-func registerCommon(imports *wago.HostImportRegistrar, module string, compress, decompress any, compressParams, decompressParams []wago.ValType) {
+func registerCommon(imports *wago.HostImportRegistrar, module string, compress, decompress, compressPacked, decompressPacked any, compressParams, decompressParams []wago.ValType) {
 	imports.HostFunc(module, "abi_version", func(call wago.HostCall) {
 		call.SetI32(0, ABIVersion)
 	}).Results(wago.ValI32).Capability(CapZstd).
@@ -148,78 +148,132 @@ func registerCommon(imports *wago.HostImportRegistrar, module string, compress, 
 	imports.HostFunc(module, "decompress", decompress).
 		Params(decompressParams...).Results(wago.ValI32, wago.ValI32).Capability(CapZstd).
 		Docs("decompress a complete bounded frame sequence and return status, written")
+	imports.HostFunc(module, "compress_packed", compressPacked).
+		Params(compressParams...).Results(wago.ValI64).Capability(CapZstd).
+		Docs("compress one complete Zstandard frame and return packed status/written")
+	imports.HostFunc(module, "decompress_packed", decompressPacked).
+		Params(decompressParams...).Results(wago.ValI64).Capability(CapZstd).
+		Docs("decompress a complete bounded frame sequence and return packed status/written")
 }
 
 func (p *Plugin) registerWasm32(imports *wago.HostImportRegistrar) {
-	registerCommon(imports, ModuleWasm32, p.compressWasm32, p.decompressWasm32,
+	registerCommon(imports, ModuleWasm32, p.compressWasm32, p.decompressWasm32, p.compressPackedWasm32, p.decompressPackedWasm32,
 		[]wago.ValType{wago.ValI32, wago.ValI32, wago.ValI32, wago.ValI32, wago.ValI32},
 		[]wago.ValType{wago.ValI32, wago.ValI32, wago.ValI32, wago.ValI32})
 }
 
 func (p *Plugin) registerWasm64(imports *wago.HostImportRegistrar) {
-	registerCommon(imports, ModuleWasm64, p.compressWasm64, p.decompressWasm64,
+	registerCommon(imports, ModuleWasm64, p.compressWasm64, p.decompressWasm64, p.compressPackedWasm64, p.decompressPackedWasm64,
 		[]wago.ValType{wago.ValI64, wago.ValI64, wago.ValI64, wago.ValI64, wago.ValI32},
 		[]wago.ValType{wago.ValI64, wago.ValI64, wago.ValI64, wago.ValI64})
 }
 
 func (p *Plugin) registerGC(imports *wago.HostImportRegistrar) {
-	registerCommon(imports, ModuleGC, p.compressGC, p.decompressGC,
+	registerCommon(imports, ModuleGC, p.compressGC, p.decompressGC, p.compressPackedGC, p.decompressPackedGC,
 		[]wago.ValType{wago.ValAnyRef, wago.ValI32, wago.ValI32, wago.ValAnyRef, wago.ValI32, wago.ValI32, wago.ValI32},
 		[]wago.ValType{wago.ValAnyRef, wago.ValI32, wago.ValI32, wago.ValAnyRef, wago.ValI32, wago.ValI32})
 }
 
 func setResult(call wago.HostCall, status Status, written int) {
+	status, written = normalizedResult(status, written)
 	call.SetI32(0, int32(status))
 	call.SetI32(1, int32(written))
 }
 
+func setPackedResult(call wago.HostCall, status Status, written int) {
+	call.SetI64(0, int64(packResult(status, written)))
+}
+
+// packResult encodes status in the low 32 bits and written in the high 32
+// bits. Configuration limits cap successful output at 64 MiB, so written is
+// always representable as uint32. Failures are normalized to written == 0.
+func packResult(status Status, written int) uint64 {
+	status, written = normalizedResult(status, written)
+	return uint64(uint32(status)) | uint64(uint32(written))<<32
+}
+
+func normalizedResult(status Status, written int) (Status, int) {
+	if status != StatusOK || written < 0 || uint64(written) > HardMaxOutputBytes {
+		if status == StatusOK {
+			status = StatusInternalError
+		}
+		return status, 0
+	}
+	return status, written
+}
+
 func (p *Plugin) compressWasm32(caller wago.Caller, call wago.HostCall) {
-	p.linearCall(caller, call, wago.GuestMemory32, true,
+	status, written := p.linearResult(caller, wago.GuestMemory32, true,
 		uint64(uint32(call.I32(0))), uint64(uint32(call.I32(1))),
 		uint64(uint32(call.I32(2))), uint64(uint32(call.I32(3))), call.I32(4))
+	setResult(call, status, written)
 }
 
 func (p *Plugin) decompressWasm32(caller wago.Caller, call wago.HostCall) {
-	p.linearCall(caller, call, wago.GuestMemory32, false,
+	status, written := p.linearResult(caller, wago.GuestMemory32, false,
 		uint64(uint32(call.I32(0))), uint64(uint32(call.I32(1))),
 		uint64(uint32(call.I32(2))), uint64(uint32(call.I32(3))), 0)
+	setResult(call, status, written)
+}
+
+func (p *Plugin) compressPackedWasm32(caller wago.Caller, call wago.HostCall) {
+	status, written := p.linearResult(caller, wago.GuestMemory32, true,
+		uint64(uint32(call.I32(0))), uint64(uint32(call.I32(1))),
+		uint64(uint32(call.I32(2))), uint64(uint32(call.I32(3))), call.I32(4))
+	setPackedResult(call, status, written)
+}
+
+func (p *Plugin) decompressPackedWasm32(caller wago.Caller, call wago.HostCall) {
+	status, written := p.linearResult(caller, wago.GuestMemory32, false,
+		uint64(uint32(call.I32(0))), uint64(uint32(call.I32(1))),
+		uint64(uint32(call.I32(2))), uint64(uint32(call.I32(3))), 0)
+	setPackedResult(call, status, written)
 }
 
 func (p *Plugin) compressWasm64(caller wago.Caller, call wago.HostCall) {
-	p.linearCall(caller, call, wago.GuestMemory64, true,
+	status, written := p.linearResult(caller, wago.GuestMemory64, true,
 		uint64(call.I64(0)), uint64(call.I64(1)), uint64(call.I64(2)), uint64(call.I64(3)), call.I32(4))
+	setResult(call, status, written)
 }
 
 func (p *Plugin) decompressWasm64(caller wago.Caller, call wago.HostCall) {
-	p.linearCall(caller, call, wago.GuestMemory64, false,
+	status, written := p.linearResult(caller, wago.GuestMemory64, false,
 		uint64(call.I64(0)), uint64(call.I64(1)), uint64(call.I64(2)), uint64(call.I64(3)), 0)
+	setResult(call, status, written)
 }
 
-func (p *Plugin) linearCall(caller wago.Caller, call wago.HostCall, addressType wago.GuestMemoryAddressType, compress bool, srcOffset, srcLength, dstOffset, dstCapacity uint64, level int32) {
+func (p *Plugin) compressPackedWasm64(caller wago.Caller, call wago.HostCall) {
+	status, written := p.linearResult(caller, wago.GuestMemory64, true,
+		uint64(call.I64(0)), uint64(call.I64(1)), uint64(call.I64(2)), uint64(call.I64(3)), call.I32(4))
+	setPackedResult(call, status, written)
+}
+
+func (p *Plugin) decompressPackedWasm64(caller wago.Caller, call wago.HostCall) {
+	status, written := p.linearResult(caller, wago.GuestMemory64, false,
+		uint64(call.I64(0)), uint64(call.I64(1)), uint64(call.I64(2)), uint64(call.I64(3)), 0)
+	setPackedResult(call, status, written)
+}
+
+func (p *Plugin) linearResult(caller wago.Caller, addressType wago.GuestMemoryAddressType, compress bool, srcOffset, srcLength, dstOffset, dstCapacity uint64, level int32) (Status, int) {
 	codec := p.activeCodec()
 	if codec == nil {
-		setResult(call, StatusInternalError, 0)
-		return
+		return StatusInternalError, 0
 	}
 	if status := validateLengths(codec, srcLength, dstCapacity); status != StatusOK {
-		setResult(call, status, 0)
-		return
+		return status, 0
 	}
 	profile, status := encoderProfile(level)
 	if compress && status != StatusOK {
-		setResult(call, status, 0)
-		return
+		return status, 0
 	}
 	worker, status := codec.acquire()
 	if status != StatusOK {
-		setResult(call, status, 0)
-		return
+		return status, 0
 	}
 	defer codec.release(worker)
 	host, ok := any(caller).(wago.GuestStorageHostModule)
 	if !ok {
-		setResult(call, StatusUnsupported, 0)
-		return
+		return StatusUnsupported, 0
 	}
 	status, written := StatusInvalidArgument, 0
 	err := host.WithGuestStorage(func(storage wago.GuestStorage) error {
@@ -248,46 +302,57 @@ func (p *Plugin) linearCall(caller wago.Caller, call wago.HostCall, addressType 
 	if err != nil {
 		status, written = StatusInvalidArgument, 0
 	}
-	setResult(call, status, written)
+	return normalizedResult(status, written)
 }
 
 func (p *Plugin) compressGC(caller wago.Caller, call wago.HostCall) {
-	p.gcCall(caller, call, true,
+	status, written := p.gcResult(caller, true,
 		call.ParamSlots()[0], uint64(uint32(call.I32(1))), uint64(uint32(call.I32(2))),
 		call.ParamSlots()[3], uint64(uint32(call.I32(4))), uint64(uint32(call.I32(5))), call.I32(6))
+	setResult(call, status, written)
 }
 
 func (p *Plugin) decompressGC(caller wago.Caller, call wago.HostCall) {
-	p.gcCall(caller, call, false,
+	status, written := p.gcResult(caller, false,
 		call.ParamSlots()[0], uint64(uint32(call.I32(1))), uint64(uint32(call.I32(2))),
 		call.ParamSlots()[3], uint64(uint32(call.I32(4))), uint64(uint32(call.I32(5))), 0)
+	setResult(call, status, written)
 }
 
-func (p *Plugin) gcCall(caller wago.Caller, call wago.HostCall, compress bool, srcToken, srcOffset, srcLength, dstToken, dstOffset, dstCapacity uint64, level int32) {
+func (p *Plugin) compressPackedGC(caller wago.Caller, call wago.HostCall) {
+	status, written := p.gcResult(caller, true,
+		call.ParamSlots()[0], uint64(uint32(call.I32(1))), uint64(uint32(call.I32(2))),
+		call.ParamSlots()[3], uint64(uint32(call.I32(4))), uint64(uint32(call.I32(5))), call.I32(6))
+	setPackedResult(call, status, written)
+}
+
+func (p *Plugin) decompressPackedGC(caller wago.Caller, call wago.HostCall) {
+	status, written := p.gcResult(caller, false,
+		call.ParamSlots()[0], uint64(uint32(call.I32(1))), uint64(uint32(call.I32(2))),
+		call.ParamSlots()[3], uint64(uint32(call.I32(4))), uint64(uint32(call.I32(5))), 0)
+	setPackedResult(call, status, written)
+}
+
+func (p *Plugin) gcResult(caller wago.Caller, compress bool, srcToken, srcOffset, srcLength, dstToken, dstOffset, dstCapacity uint64, level int32) (Status, int) {
 	codec := p.activeCodec()
 	if codec == nil {
-		setResult(call, StatusInternalError, 0)
-		return
+		return StatusInternalError, 0
 	}
 	if status := validateLengths(codec, srcLength, dstCapacity); status != StatusOK {
-		setResult(call, status, 0)
-		return
+		return status, 0
 	}
 	profile, status := encoderProfile(level)
 	if compress && status != StatusOK {
-		setResult(call, status, 0)
-		return
+		return status, 0
 	}
 	worker, status := codec.acquire()
 	if status != StatusOK {
-		setResult(call, status, 0)
-		return
+		return status, 0
 	}
 	defer codec.release(worker)
 	host, ok := any(caller).(wago.GuestStorageHostModule)
 	if !ok {
-		setResult(call, StatusUnsupported, 0)
-		return
+		return StatusUnsupported, 0
 	}
 	status, written := StatusInvalidArgument, 0
 	err := host.WithGuestStorage(func(storage wago.GuestStorage) error {
@@ -346,7 +411,7 @@ func (p *Plugin) gcCall(caller wago.Caller, call wago.HostCall, compress bool, s
 	if err != nil {
 		status, written = StatusInvalidArgument, 0
 	}
-	setResult(call, status, written)
+	return normalizedResult(status, written)
 }
 
 func (p *Plugin) activeCodec() *Codec {

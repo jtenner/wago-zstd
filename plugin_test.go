@@ -18,6 +18,8 @@ var (
 	wasm64Guest []byte
 	//go:embed testdata/gc.wasm
 	gcGuest []byte
+	//go:embed testdata/tinygo_guest.wasm
+	tinyGoGuest []byte
 )
 
 func TestProviderDefinitionAndConfig(t *testing.T) {
@@ -31,7 +33,7 @@ func TestProviderDefinitionAndConfig(t *testing.T) {
 	if got := provider.Definition.Provenance.License; got != "Apache-2.0" {
 		t.Fatalf("license metadata = %q", got)
 	}
-	if got := provider.Definition.Version; got != "0.0.0" {
+	if got := provider.Definition.Version; got != "0.0.1" {
 		t.Fatalf("version metadata = %q", got)
 	}
 	if got := provider.Definition.Compatibility.Platforms; len(got) != 1 || got[0] != "linux/amd64" {
@@ -90,11 +92,83 @@ func TestGCArrayByteLengthUsesBackingWidth(t *testing.T) {
 	}
 }
 
+func TestPackResultLayoutAndFailureNormalization(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      Status
+		written     int
+		wantStatus  Status
+		wantWritten uint32
+	}{
+		{"success", StatusOK, 1234, StatusOK, 1234},
+		{"failure", StatusInvalidData, 1234, StatusInvalidData, 0},
+		{"negative success", StatusOK, -1, StatusInternalError, 0},
+		{"oversize success", StatusOK, int(HardMaxOutputBytes) + 1, StatusInternalError, 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			packed := packResult(test.status, test.written)
+			if got := Status(uint32(packed)); got != test.wantStatus {
+				t.Fatalf("status = %v, want %v", got, test.wantStatus)
+			}
+			if got := uint32(packed >> 32); got != test.wantWritten {
+				t.Fatalf("written = %d, want %d", got, test.wantWritten)
+			}
+		})
+	}
+}
+
 func TestWagoGuestABIs(t *testing.T) {
 	if goruntime.GOARCH != "amd64" && goruntime.GOARCH != "arm64" {
 		t.Skip("Wago native execution integration runs on amd64 and arm64")
 	}
 	testWagoGuestABIs(t)
+}
+
+func TestTinyGoGuestPackedABI(t *testing.T) {
+	if goruntime.GOARCH != "amd64" && goruntime.GOARCH != "arm64" {
+		t.Skip("Wago native execution integration runs on amd64 and arm64")
+	}
+	testTinyGoGuestPackedABI(t)
+}
+
+func testTinyGoGuestPackedABI(t *testing.T) {
+	t.Helper()
+	set, err := PluginSet(Config{
+		MaxInputBytes:         1 << 20,
+		MaxOutputBytes:        1 << 20,
+		MaxWindowBytes:        1 << 20,
+		MaxDecoderMemoryBytes: 1 << 20,
+		MaxConcurrent:         1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := wago.NewRuntime()
+	defer runtime.Close()
+	if err := runtime.LoadPlugins(context.Background(), set); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := runtime.Compile(tinyGoGuest)
+	if err != nil {
+		t.Fatalf("compile TinyGo guest: %v", err)
+	}
+	defer compiled.Close()
+	instance, err := runtime.Instantiate(context.Background(), compiled)
+	if err != nil {
+		t.Fatalf("instantiate TinyGo guest: %v", err)
+	}
+	defer instance.Close()
+	if _, err := instance.Invoke("_initialize"); err != nil {
+		t.Fatalf("initialize TinyGo guest: %v", err)
+	}
+	results, err := instance.Invoke("run")
+	if err != nil {
+		t.Fatalf("run TinyGo guest: %v", err)
+	}
+	if len(results) != 1 || wago.AsI32(results[0]) != 0 {
+		t.Fatalf("TinyGo guest result = %v, want 0", results)
+	}
 }
 
 func testWagoGuestABIs(t *testing.T) {
@@ -154,7 +228,7 @@ func testWagoGuestABIs(t *testing.T) {
 				testLinearABI(t, instance, test.name == "wasm64", []byte(test.wantMemory))
 				return
 			}
-			for _, export := range []string{"short_output", "bounds", "invalid", "checksum", "overlap", "immutable_backing_limit"} {
+			for _, export := range []string{"short_output", "bounds", "invalid", "checksum", "overlap", "immutable_backing_limit", "packed_parity"} {
 				results, err := instance.Invoke(export)
 				if err != nil {
 					t.Fatalf("%s: %v", export, err)
@@ -181,6 +255,39 @@ func testLinearABI(t *testing.T, instance *wago.Instance, memory64 bool, plain [
 			t.Fatalf("%s results = %v", name, results)
 		}
 		return Status(wago.AsI32(results[0])), int(wago.AsI32(results[1]))
+	}
+	invokePacked := func(name string, arguments ...uint64) (Status, int) {
+		t.Helper()
+		results, err := instance.Invoke(name, arguments...)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("%s results = %v", name, results)
+		}
+		return Status(uint32(results[0])), int(uint32(results[0] >> 32))
+	}
+
+	// The WAT-authored proxies prove the packed and legacy imports have the
+	// same parameters and behavior for both success and failure.
+	copy(memory[28000:], plain)
+	legacyStatus, legacyCompressed := invokePair("compress_proxy", 28000, uint64(len(plain)), 30000, 1024, 0)
+	packedStatus, packedCompressed := invokePacked("compress_packed_proxy", 28000, uint64(len(plain)), 32000, 1024, 0)
+	if packedStatus != legacyStatus || packedCompressed != legacyCompressed || !bytes.Equal(memory[30000:30000+legacyCompressed], memory[32000:32000+packedCompressed]) {
+		t.Fatalf("packed compress parity = %v/%d, legacy = %v/%d", packedStatus, packedCompressed, legacyStatus, legacyCompressed)
+	}
+	legacyStatus, legacyWritten := invokePair("decompress_proxy", 30000, uint64(legacyCompressed), 34000, 1024)
+	packedStatus, packedWritten := invokePacked("decompress_packed_proxy", 32000, uint64(packedCompressed), 36000, 1024)
+	if packedStatus != legacyStatus || packedWritten != legacyWritten || !bytes.Equal(memory[34000:34000+legacyWritten], memory[36000:36000+packedWritten]) {
+		t.Fatalf("packed decompress parity = %v/%d, legacy = %v/%d", packedStatus, packedWritten, legacyStatus, legacyWritten)
+	}
+	for index := 38000; index < 38016; index++ {
+		memory[index] = 0x4d
+	}
+	legacyStatus, legacyWritten = invokePair("compress_proxy", 28000, uint64(len(plain)), 38000, 16, 23)
+	packedStatus, packedWritten = invokePacked("compress_packed_proxy", 28000, uint64(len(plain)), 38000, 16, 23)
+	if packedStatus != legacyStatus || packedWritten != 0 || legacyWritten != 0 || !bytes.Equal(memory[38000:38016], bytes.Repeat([]byte{0x4d}, 16)) {
+		t.Fatalf("packed failure parity = %v/%d, legacy = %v/%d", packedStatus, packedWritten, legacyStatus, legacyWritten)
 	}
 
 	// Both calls intentionally overlap input and output by one byte. Complete

@@ -5,6 +5,10 @@
     (func $compress (param i32 i32 i32 i32 i32) (result i32 i32)))
   (import "wago_zstd.wasm32" "decompress"
     (func $decompress (param i32 i32 i32 i32) (result i32 i32)))
+  (import "wago_zstd.wasm32" "compress_packed"
+    (func $compress_packed (param i32 i32 i32 i32 i32) (result i64)))
+  (import "wago_zstd.wasm32" "decompress_packed"
+    (func $decompress_packed (param i32 i32 i32 i32) (result i64)))
 
   (memory (export "memory") 2 2)
   (data (i32.const 0) "Wago Zstandard memory32 integration")
@@ -24,6 +28,21 @@
     local.get 2
     local.get 3
     call $decompress)
+
+  (func (export "compress_packed_proxy") (param i32 i32 i32 i32 i32) (result i64)
+    local.get 0
+    local.get 1
+    local.get 2
+    local.get 3
+    local.get 4
+    call $compress_packed)
+
+  (func (export "decompress_packed_proxy") (param i32 i32 i32 i32) (result i64)
+    local.get 0
+    local.get 1
+    local.get 2
+    local.get 3
+    call $decompress_packed)
 
   (func (export "run") (result i32)
     (local $status i32)

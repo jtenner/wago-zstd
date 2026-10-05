@@ -6,7 +6,7 @@
       "definition": {
         "id": "github.com/jtenner/wago-zstd",
         "name": "Zstandard",
-        "version": "0.0.0",
+        "version": "0.0.1",
         "description": "Bounded whole-buffer Zstandard compression and decompression.",
         "stability": "experimental",
         "compatibility": {
@@ -77,7 +77,7 @@
           "type": "object"
         }
       },
-      "definitionDigest": "sha256:6140f2da5c4007531ecb1985a38fcb7181f00b1df250594f1e0965bdde494d5c"
+      "definitionDigest": "sha256:06112e032b517d5f887c271fc0bccb5982ca484384f929f2537cb84c127995f3"
     }
   ]
 }
