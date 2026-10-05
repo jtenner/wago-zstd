@@ -94,6 +94,10 @@ func TestWagoGuestABIs(t *testing.T) {
 	if goruntime.GOARCH != "amd64" && goruntime.GOARCH != "arm64" {
 		t.Skip("Wago native execution integration runs on amd64 and arm64")
 	}
+	testWagoGuestABIs(t)
+}
+
+func testWagoGuestABIs(t *testing.T) {
 	set, err := PluginSet(Config{
 		MaxInputBytes:         1 << 20,
 		MaxOutputBytes:        1 << 20,
@@ -150,7 +154,7 @@ func TestWagoGuestABIs(t *testing.T) {
 				testLinearABI(t, instance, test.name == "wasm64", []byte(test.wantMemory))
 				return
 			}
-			for _, export := range []string{"short_output", "bounds", "invalid", "overlap", "immutable_backing_limit"} {
+			for _, export := range []string{"short_output", "bounds", "invalid", "checksum", "overlap", "immutable_backing_limit"} {
 				results, err := instance.Invoke(export)
 				if err != nil {
 					t.Fatalf("%s: %v", export, err)
@@ -197,6 +201,15 @@ func testLinearABI(t *testing.T, instance *wago.Instance, memory64 bool, plain [
 	if status != StatusOK {
 		t.Fatalf("setup compress = %d/%v", compressed, status)
 	}
+	for index := 24000; index < 24016; index++ {
+		memory[index] = 0x7c
+	}
+	memory[8192+compressed-1] ^= 1
+	status, written = invokePair("decompress_proxy", 8192, uint64(compressed), 24000, uint64(len(plain)))
+	if status != StatusChecksumMismatch || written != 0 || !bytes.Equal(memory[24000:24016], bytes.Repeat([]byte{0x7c}, 16)) {
+		t.Fatalf("checksum failure = %d/%v, destination changed=%v", written, status, !bytes.Equal(memory[24000:24016], bytes.Repeat([]byte{0x7c}, 16)))
+	}
+	memory[8192+compressed-1] ^= 1
 	for index := 20000; index < 20016; index++ {
 		memory[index] = 0x5a
 	}

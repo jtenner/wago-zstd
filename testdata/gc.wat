@@ -232,6 +232,107 @@
     i32.eqz
     i32.and)
 
+  (func (export "checksum") (result i32)
+    (local $source (ref null $bytes))
+    (local $compressed-buffer (ref null $bytes))
+    (local $output (ref null $bytes))
+    (local $status i32)
+    (local $compressed i32)
+    (local $written i32)
+
+    i32.const 16
+    array.new_default $bytes
+    local.set $source
+    local.get $source
+    ref.as_non_null
+    i32.const 0
+    i32.const 65
+    i32.const 16
+    array.fill $bytes
+    i32.const 256
+    array.new_default $bytes
+    local.set $compressed-buffer
+    i32.const 32
+    array.new_default $bytes
+    local.set $output
+    local.get $output
+    ref.as_non_null
+    i32.const 0
+    i32.const 2088533116
+    array.set $bytes
+
+    local.get $source
+    ref.as_non_null
+    i32.const 0
+    i32.const 64
+    local.get $compressed-buffer
+    ref.as_non_null
+    i32.const 0
+    i32.const 1024
+    i32.const 0
+    call $compress
+    local.set $compressed
+    local.set $status
+    local.get $status
+    if
+      i32.const 0
+      return
+    end
+
+    ;; Flip one bit in the frame checksum's last byte. array<i32> is exposed
+    ;; as raw little-endian bytes, so select the containing element and shift.
+    local.get $compressed-buffer
+    ref.as_non_null
+    local.get $compressed
+    i32.const 1
+    i32.sub
+    i32.const 2
+    i32.shr_u
+    local.get $compressed-buffer
+    ref.as_non_null
+    local.get $compressed
+    i32.const 1
+    i32.sub
+    i32.const 2
+    i32.shr_u
+    array.get $bytes
+    i32.const 1
+    local.get $compressed
+    i32.const 1
+    i32.sub
+    i32.const 3
+    i32.and
+    i32.const 3
+    i32.shl
+    i32.shl
+    i32.xor
+    array.set $bytes
+
+    local.get $compressed-buffer
+    ref.as_non_null
+    i32.const 0
+    local.get $compressed
+    local.get $output
+    ref.as_non_null
+    i32.const 0
+    i32.const 128
+    call $decompress
+    local.set $written
+    local.set $status
+    local.get $status
+    i32.const 7
+    i32.eq
+    local.get $written
+    i32.eqz
+    i32.and
+    local.get $output
+    ref.as_non_null
+    i32.const 0
+    array.get $bytes
+    i32.const 2088533116
+    i32.eq
+    i32.and)
+
   (func (export "immutable_backing_limit") (result i32)
     (local $source (ref null $immutable-bytes))
     (local $output (ref null $bytes))

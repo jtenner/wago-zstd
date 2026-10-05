@@ -133,6 +133,29 @@ go test -race ./...
 go vet ./...
 ```
 
+### TinyGo host qualification
+
+The dedicated Linux/amd64 CI job builds and executes Wago plus this plugin as a
+TinyGo **host**. It runs the Wasm32, Memory64, and WasmGC fixtures through the
+real host imports, including success, overlap, short-output, bounds, malformed
+input, checksum, and immutable-GC-source cases. These fixtures are authored in
+WAT; this qualification is distinct from compiling a guest with TinyGo.
+
+The pinned toolchain and flags are:
+
+```sh
+# TinyGo 0.41.1, Go 1.26.1, Linux/amd64
+tinygo test -v -scheduler=tasks -gc=conservative -opt=z -no-debug -p=2 \
+  -tags=noasm -run '^TestTinyGoHostIntegration$' .
+```
+
+Wago v0.1.0-beta.11 pins TinyGo 0.41.1. Its usual Go 1.22 pairing cannot load
+`klauspost/compress` v1.20.1, whose module requires Go 1.25, so CI pins Go
+1.26.1: it satisfies the dependency and remains within TinyGo 0.41.1's supported
+Go 1.19–1.26 range. The `noasm` tag selects klauspost's maintained pure-Go
+codec path; without it, TinyGo cannot link the dependency's Go-assembly entry
+points. This does not replace the codec or fork its algorithm.
+
 The checked-in integration fixtures can be regenerated with `wasm-tools`:
 
 ```sh
