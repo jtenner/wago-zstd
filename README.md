@@ -165,7 +165,9 @@ tinygo test -v -scheduler=tasks -gc=conservative -opt=z -no-debug -p=2 \
 ```
 
 TinyGo 0.42.0 and Go 1.27.1 are pinned for the guest build and host execution.
-The `noasm` tag is required only when compiling the host: it selects
+CI applies the exact upstream task-exit fix used by the pinned Wago dependency
+before compiling with `-scheduler=tasks`. The `noasm` tag is required only when
+compiling the host: it selects
 klauspost's maintained pure-Go codec path because TinyGo cannot link the
 dependency's Go-assembly entry points. This does not replace the codec or fork
 its algorithm.
