@@ -2,7 +2,7 @@
 # TinyGo 0.42.0 shipped with a duplicate task-exit symbol when using
 # -scheduler=tasks. Apply upstream tinygo-org/tinygo#5656 to its installed
 # source tree until a release containing the fix is available. This mirrors the
-# exact workaround used by the pinned Wago dependency's CI.
+# exact workaround used by Wago's current CI.
 set -euo pipefail
 
 case "$(tinygo version)" in
@@ -31,12 +31,15 @@ changes = (
      "//go:linkname tinygo_task_exit tinygo_task_exit\n",
      "//go:linkname tinygo_task_exit tinygo_task_exit_thread\n"),
 )
+planned = []
 for path, old, new in changes:
     source = path.read_text()
     if source.count(new) == 1 and old not in source:
         continue
     if source.count(old) != 1 or new in source:
         raise SystemExit(f"patch-tinygo-042: unexpected contents in {path}")
-    path.write_text(source.replace(old, new, 1))
+    planned.append((path, source.replace(old, new, 1)))
+for path, source in planned:
+    path.write_text(source)
 print("patch-tinygo-042: upstream task-exit fix present")
 PY
