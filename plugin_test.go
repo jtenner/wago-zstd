@@ -5,7 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"runtime"
+	goruntime "runtime"
 	"testing"
 
 	wago "github.com/wago-org/wago"
@@ -91,7 +91,7 @@ func TestGCArrayByteLengthUsesBackingWidth(t *testing.T) {
 }
 
 func TestWagoGuestABIs(t *testing.T) {
-	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+	if goruntime.GOARCH != "amd64" && goruntime.GOARCH != "arm64" {
 		t.Skip("Wago native execution integration runs on amd64 and arm64")
 	}
 	set, err := PluginSet(Config{
@@ -122,6 +122,9 @@ func TestWagoGuestABIs(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if goruntime.GOOS == "windows" && test.name != "wasm32" {
+				t.Skip("Wago v0.1.0-beta.11 disables Memory64 and Wasm GC execution on Windows")
+			}
 			compiled, err := runtime.Compile(test.guest)
 			if err != nil {
 				t.Fatal(err)
